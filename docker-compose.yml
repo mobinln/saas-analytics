@@ -40,5 +40,4 @@ services:
 
 volumes:
   kafka-data:
-  kafka-connect:
   pg-data:
