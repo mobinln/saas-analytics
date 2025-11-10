@@ -1,0 +1,7 @@
+dbt-postgres
+psycopg2-binary
+kafka-python
+Faker
+prometheus-client
+Flask
+jwt

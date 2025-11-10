@@ -1,0 +1,36 @@
+version: 2
+
+sources:
+  - name: raw
+    database: saas_analytics
+    schema: public
+    tables:
+      - name: raw_events
+      - name: dim_tenants
+      - name: dim_users
+
+models:
+  - name: fct_daily_usage
+    description: "Daily aggregated usage metrics per tenant"
+    columns:
+      - name: tenant_id
+        description: "Unique tenant identifier"
+        tests:
+          - not_null
+      - name: date
+        description: "Date of activity"
+        tests:
+          - not_null
+      - name: error_rate
+        description: "Percentage of events that resulted in errors"
+        tests:
+          - accepted_values:
+              values: ['>=0', '<=100']
+              quote: false
+
+  - name: fct_tenant_summary
+    description: "Current health snapshot for each tenant"
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - tenant_id

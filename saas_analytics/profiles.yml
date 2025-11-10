@@ -1,0 +1,12 @@
+saas_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: dataeng
+      password: dataeng123
+      dbname: saas_analytics
+      schema: analytics
+      threads: 4
