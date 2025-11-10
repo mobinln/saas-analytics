@@ -6,6 +6,18 @@
 Event Sources → FastAPI → Kafka → Dagster → PostgreSQL → dbt → Superset
 ```
 
+## Commands
+
+```bash
+# Run Docker Compose
+docker compose up -d
+
+# Run FastApi
+cd api
+source ./.venv/bin/activate
+python3 -m fastapi dev main.py
+```
+
 ## Resources
 
 - [dbt Quick Start](https://docs.getdbt.com/guides/manual-install?step=1)

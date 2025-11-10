@@ -1,0 +1,4 @@
+kafka-python
+fastapi[standard]
+pydantic
+python-dotenv
