@@ -1,55 +1,267 @@
 services:
+  # PostgreSQL - Data Warehouse
   postgres:
     image: postgres:16
+    container_name: mt_postgres
     environment:
-      POSTGRES_USER: dataeng
-      POSTGRES_PASSWORD: dataeng123
-      POSTGRES_DB: saas_analytics
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analytics_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mt_network
 
+  # Zookeeper for Kafka
   zookeeper:
-    image: confluentinc/cp-zookeeper:7.4.4
-    ports:
-      - "2181:2181"
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: mt_zookeeper
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - mt_network
 
+  # Kafka
   kafka:
-    image: confluentinc/cp-kafka:7.4.4
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: mt_kafka
     depends_on:
       - zookeeper
     ports:
       - "9092:9092"
+      - "29092:29092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: kafka-broker-api-versions --bootstrap-server localhost:9092
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    networks:
+      - mt_network
 
-  superset:
-    image: apache/superset:latest
+  # Redis for Airflow
+  redis:
+    image: redis:7-alpine
+    container_name: mt_redis
     ports:
-      - "8088:8088"
-    environment:
-      - SUPERSET_SECRET_KEY=your_secret_key_here
-    depends_on:
-      - postgres
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mt_network
 
-  airflow-webserver:
-    image: apache/airflow:3.1.1
+  # Airflow PostgreSQL metadata DB
+  airflow_postgres:
+    image: postgres:16
+    container_name: mt_airflow_postgres
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://dataeng:dataeng123@postgres/airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    ports:
+      - "5433:5432"
+    volumes:
+      - airflow_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mt_network
+
+  # Airflow Webserver
+  airflow_webserver:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: mt_airflow_webserver
+    depends_on:
+      - airflow_postgres
+      - redis
+      - postgres
+      - kafka
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__FERNET_KEY: "UKMzEm3yIuFYEq1y3-2FxPNWSVwRASpahmQ9kQfEr8E="
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
+      AIRFLOW__WEBSERVER__SECRET_KEY: "airflow_secret_key_change_me"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     ports:
       - "8080:8080"
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./dbt:/opt/dbt
+      - airflow_logs:/opt/airflow/logs
+    command: >
+      bash -c "airflow db migrate &&
+               airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || true &&
+               airflow webserver"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - mt_network
+
+  # Airflow Scheduler
+  airflow_scheduler:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: mt_airflow_scheduler
+    depends_on:
+      - airflow_webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__FERNET_KEY: "UKMzEm3yIuFYEq1y3-2FxPNWSVwRASpahmQ9kQfEr8E="
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./dbt:/opt/dbt
+      - airflow_logs:/opt/airflow/logs
+    command: airflow scheduler
+    networks:
+      - mt_network
+
+  # Airflow Worker
+  airflow_worker:
+    build:
+      context: ./airflow
+      dockerfile: Dockerfile
+    container_name: mt_airflow_worker
+    depends_on:
+      - airflow_scheduler
+    environment:
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@airflow_postgres/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://redis:6379/0
+      AIRFLOW__CORE__FERNET_KEY: "UKMzEm3yIuFYEq1y3-2FxPNWSVwRASpahmQ9kQfEr8E="
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/plugins:/opt/airflow/plugins
+      - ./dbt:/opt/dbt
+      - airflow_logs:/opt/airflow/logs
+    command: airflow celery worker
+    networks:
+      - mt_network
+
+  # Apache Superset
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    container_name: mt_superset
     depends_on:
       - postgres
-    command: webserver
+    environment:
+      SUPERSET_SECRET_KEY: "superset_secret_key_change_me_in_production"
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
+    ports:
+      - "8088:8088"
+    volumes:
+      - superset_home:/app/superset_home
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py
+      - ./superset/security:/app/security
+    networks:
+      - mt_network
+
+  # Event Producer (Simulates SaaS product events)
+  event_producer:
+    build:
+      context: ./event-producer
+      dockerfile: Dockerfile
+    container_name: mt_event_producer
+    depends_on:
+      - kafka
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      KAFKA_TOPIC: tenant_events
+    networks:
+      - mt_network
+
+  # API Service (Tenant provisioning & guest tokens)
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: mt_api
+    depends_on:
+      - postgres
+      - superset
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: analytics_user
+      POSTGRES_PASSWORD: analytics_pass
+      POSTGRES_DB: analytics_db
+      SUPERSET_URL: http://superset:8088
+      SUPERSET_USERNAME: admin
+      SUPERSET_PASSWORD: admin
+    ports:
+      - "8000:8000"
+    networks:
+      - mt_network
 
 volumes:
   postgres_data:
+  airflow_postgres_data:
+  airflow_logs:
+  superset_home:
+
+networks:
+  mt_network:
+    driver: bridge
