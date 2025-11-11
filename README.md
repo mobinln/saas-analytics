@@ -2,13 +2,16 @@
 
 ## Architecture Overview
 
-```
-Event Sources → FastAPI → Kafka → Dagster → PostgreSQL → dbt → Superset
+```text
+
+Event Sources → FastAPI → Kafka → Kafka Connect → PostgreSQL → Dagster → dbt → Superset
+
 ```
 
 ## Commands
 
 ```bash
+
 # Run Docker Compose
 docker compose up -d
 
