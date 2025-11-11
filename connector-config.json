@@ -1,0 +1,18 @@
+{
+  "name": "postgres-sink",
+  "config": {
+    "connector.class": "io.confluent.connect.jdbc.JdbcSinkConnector",
+    "tasks.max": "1",
+    "topics": "tenant_events",
+    "connection.url": "jdbc:postgresql://postgres:5432/analytics_db",
+    "connection.user": "analytics",
+    "connection.password": "analytics123",
+    "auto.create": "false",
+    "insert.mode": "insert",
+    "table.name.format": "tenant_events_raw",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "false"
+  }
+}
