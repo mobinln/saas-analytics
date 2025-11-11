@@ -2,3 +2,4 @@ kafka-python
 fastapi[standard]
 pydantic
 python-dotenv
+psycopg2-binary
