@@ -1,3 +1,4 @@
+import os
 import json
 import logging
 import signal
@@ -6,6 +7,10 @@ from kafka import KafkaConsumer
 import psycopg2
 from psycopg2.extras import execute_batch
 
+import dotenv
+
+dotenv.load_dotenv()
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -13,10 +18,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-KAFKA_SERVERS = ["localhost:9092"]
-KAFKA_TOPIC = "tenant_events"
+KAFKA_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "tenant_events")
 KAFKA_GROUP = "postgres-sink-group"
-DB_CONFIG = "dbname=yourdb user=user password=pass host=localhost"
+DB_CONFIG = f"dbname={os.getenv('POSTGRES_DB')} user={os.getenv('POSTGRES_USER')} password={os.getenv('POSTGRES_PASSWORD')} host={os.getenv('POSTGRES_HOST')}"
 BATCH_SIZE = 100
 
 
@@ -52,7 +57,7 @@ class EventConsumer:
             return True
 
         insert_query = """
-            INSERT INTO tenant_events 
+            INSERT INTO tenant_events_raw 
             (event_id, tenant_id, event_type, event_timestamp, user_id, session_id, event_data)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (event_id) DO NOTHING
