@@ -52,6 +52,20 @@ dg dev
 
 Open http://localhost:3000 in your browser to see the project.
 
+### Running dbt
+
+Run dbt tasks
+
+```bash
+dbt run
+```
+
+Run dbt test
+
+```bash
+dbt test
+```
+
 ## Learn more
 
 To learn more about this template and Dagster in general:
