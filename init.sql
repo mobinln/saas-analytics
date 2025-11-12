@@ -12,3 +12,5 @@ CREATE INDEX idx_tenant_id ON tenant_events_raw(tenant_id);
 CREATE INDEX idx_event_type ON tenant_events_raw(event_type);
 CREATE INDEX idx_event_timestamp ON tenant_events_raw(event_timestamp);
 CREATE INDEX idx_event_data ON tenant_events_raw USING gin(event_data);
+
+CREATE DATABASE metabaseappdb;
