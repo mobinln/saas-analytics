@@ -25,6 +25,9 @@ cd api
 source ./.venv/bin/activate
 python3 event_consumer.py
 
+# Go inside psql shell
+psql -h localhost -U analytics -d analytics_db
+
 ```
 
 ## Resources

@@ -1,0 +1,12 @@
+dbt_ingest:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: analytics
+      password: analytics123
+      dbname: analytics_db
+      schema: public
+      threads: 4

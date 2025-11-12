@@ -57,7 +57,7 @@ class EventConsumer:
             return True
 
         insert_query = """
-            INSERT INTO tenant_events_raw 
+            INSERT INTO tenant_events_raw
             (event_id, tenant_id, event_type, event_timestamp, user_id, session_id, event_data)
             VALUES (%s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (event_id) DO NOTHING

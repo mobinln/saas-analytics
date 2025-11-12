@@ -2,7 +2,6 @@ import uuid
 from fastapi import FastAPI, Body
 from datetime import datetime
 from contextlib import asynccontextmanager
-import json
 
 from api.schemas import EventRequest
 from api.event_producer import create_producer, KAFKA_TOPIC
@@ -41,7 +40,7 @@ def save_event(event: EventRequest = Body()):
         "event_timestamp": timestamp.isoformat(),
         "user_id": event.user_id,
         "session_id": event.session_id,
-        "event_data": json.dumps(event.event_data),
+        "event_data": event.event_data,
     }
 
     kafka_producer.send(KAFKA_TOPIC, value=event)
