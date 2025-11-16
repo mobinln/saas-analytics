@@ -1,4 +1,4 @@
-dbt_ingest:
+events:
   target: dev
   outputs:
     dev:
