@@ -1,16 +1,56 @@
 # saas-analytics
 
+## Overview
+
+An event-ingestion service for SaaS analytics, in a single Go binary. Clients POST events over HTTP; the server batches them in memory and a worker pool writes them to ClickHouse. It's designed for teams that want analytics infrastructure without standing up a streaming pipeline.
+
+- **Standalone.** One process, one container. No Kafka, no Flink, no microservices.
+- **Swappable storage.** ClickHouse by default. The `BatchInserter` interface makes Postgres, Cassandra, or Iceberg a small adapter away.
+- **Honest scope.** Targets small-to-medium workloads — see the Benchmark section for measured numbers. Beyond that, you'll want sharded ingestion and a proper streaming pipeline.
+
+## Benchmark
+
+**~65K events/s sustained ingest into ClickHouse, 0% loss, on 2 CPU cores.**
+
+Server: `GOMAXPROCS=2 go run cmd/server/main.go` with tuned drain config (`WORKER_COUNT=16`, `CLICKHOUSE_MAX_OPEN_CONNS=16`, lowered `BATCH_FLUSH_INTERVAL_MS`).
+Load: `local_dev/benchmark.sh` — wrk, 4 threads · 1000 connections · 30s.
+
+| Metric                         | Value        |
+| ------------------------------ | ------------ |
+| Sustained ingest (0% loss)     | 64,850 req/s |
+| Dropped (HTTP 503, queue full) | 0            |
+| Latency p50                    | 15.78 ms     |
+| Latency p90                    | 25.35 ms     |
+| Latency p99                    | 38.74 ms     |
+| Latency max                    | 110.38 ms    |
+
 ## Improvements
 
-- Top-K events: expose an API to report Top-K events.
-- Graceful shutdown: catch SIGINT/SIGTERM, stop accepting requests, close the queue, drain workers, and flush in-flight batches before exit.
-- Time-series endpoint: GET /events/timeseries?bucket=1m&from=...&to=... returning counts per bucket — perfect for charts.
-- Anomaly Detector: add anomaly detection to alert high or low spikes in events.
-- Makefile: add makefile
+1. **Graceful shutdown + worker context plumbing** — catch SIGINT/SIGTERM, build an explicit `*http.Server` with timeouts, plumb a `context.Context` into `Ingester.Start(ctx)` so workers drain the queue and flush in-flight batches before exit, then close the ClickHouse connection.
+2. **Surface ingest errors + bounded retry** — replace the discarded error in `eventsWorker` with a zap log + `events_lost_total{reason}` counter, add bounded exponential-backoff retries (e.g., 3 attempts), and consider a DLQ / disk spill for batches that exhaust retries.
+3. **EventTime semantics** — either include `event_time` in `InsertBatch` (defaulting to `time.Now()` when the client omits it), or drop the field from the JSON-bound `Event` so the API no longer implies support it doesn't have.
+4. **Request-size limit + `Data` validation** — wrap the request body with `http.MaxBytesReader` (e.g., 64 KB) and cap `Data` key count / total size to prevent oversized rows and OOMs.
+5. **Unit tests on the ingester** — table-driven tests using a fake `BatchInserter`: `Enqueue` returns false when full, batch flushes at `batchSize`, batch flushes on ticker below `batchSize`, drain-on-shutdown.
+6. **Makefile** — common targets (`run`, `bench`, `test`, `migrate`) so contributors don't memorize commands.
+7. **Top-K events API** — expose an endpoint to report Top-K events.
+8. **Time-series endpoint** — `GET /events/timeseries?bucket=1m&from=...&to=...` returning counts per bucket — perfect for charts.
+9. **Anomaly detector** — alert on high or low spikes in event rates.
 
 ## Ideas
 
-- Persistence layer: swap the in-memory store for a durable backend (SQLite/Postgres/BoltDB) so counts and events survive restarts.
-- Forecasting: simple Holt-Winters or EWMA baseline alongside the z-score detector.
-- WebSocket / SSE stream at /events/stream that pushes new events (optionally filtered) live — great for dashboards.
-- Downsampling: save events by different granularity (minute or hour) to reduce storage.
+- **Persistence layer** — swap the in-memory store for a durable backend (SQLite/Postgres/BoltDB) so counts and events survive restarts.
+- **Forecasting** — simple Holt-Winters or EWMA baseline alongside the z-score detector.
+- **WebSocket / SSE stream** at `/events/stream` that pushes new events (optionally filtered) live — great for dashboards.
+- **Downsampling** — save events by different granularity (minute or hour) to reduce storage.
+- **Pluggable storage backends** — abstract `BatchInserter` is already in place; add adapters for Postgres / Kafka / S3 (Parquet) so the same ingester can fan out to a warehouse or message bus alongside ClickHouse.
+- **Schema-on-write validation** — let users register named event schemas (JSON Schema or simple field/type maps) and reject events that don't match; emit a `schema_violations_total{schema}` metric.
+- **Per-tenant API keys + rate limiting** — header-based auth (`X-API-Key`) mapped to a tenant ID stored as an event column, with a token-bucket rate limiter per tenant. Unblocks multi-tenant SaaS use.
+- **Sampling / shedding policies** — when the queue crosses a high-water mark, drop low-priority event types (configurable) before dropping high-priority ones, instead of uniform 503s.
+- **Sessionization / enrichment** — derive `session_id` from a sliding window of events per user, or enrich incoming events with GeoIP / UA parsing before the ClickHouse insert.
+- **Replay / backfill endpoint** — `POST /events/bulk` accepting newline-delimited JSON or Parquet, useful for migrating from another system or replaying after an outage.
+- **Cohort / funnel queries** — `GET /events/funnel?steps=signup,activate,convert&window=7d` returning step-by-step conversion counts. ClickHouse's `windowFunnel` makes this almost free.
+- **Materialized views for hot aggregations** — Top-K and time-series queries served from ClickHouse `MATERIALIZED VIEW`s instead of scanning the raw table, dropping query latency from seconds to ms at scale.
+- **OpenTelemetry traces** — wrap the ingest path in OTel spans so a slow event can be traced from HTTP receive → queue → batch → ClickHouse insert. Pairs well with the existing Prometheus metrics.
+- **Grafana dashboard JSON** — ship a pre-built dashboard in `local_dev/` (queue depth, p99, drop rate, ClickHouse insert duration, rows/s) so new contributors get observability out of the box.
+- **Dockerfile + image publish** — multi-stage build, distroless base, GitHub Actions to publish on tag. Pairs with the Makefile in Improvements #6.
+- **Config validation at startup** — reject configs where `WORKER_COUNT > CLICKHOUSE_MAX_OPEN_CONNS` (workers will contend) or `BATCH_FLUSH_INTERVAL_MS == 0`, instead of letting them quietly misbehave.
