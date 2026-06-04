@@ -1,0 +1,50 @@
+services:
+  clickhouse:
+    image: hub.hamdocker.ir/clickhouse/clickhouse-server:24.8
+    container_name: my-clickhouse
+    ports:
+      - "8123:8123"   # HTTP interface
+      - "9000:9000"   # native protocol (Go driver uses this)
+    env_file:
+      - ../.env
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB}
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+
+  prometheus:
+    image: hub.hamdocker.ir/prom/prometheus:latest
+    container_name: my-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: hub.hamdocker.ir/grafana/grafana:latest
+    container_name: my-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+volumes:
+  clickhouse_data:
+  prometheus_data:
+  grafana_data:
