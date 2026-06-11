@@ -26,15 +26,10 @@ Load: `local_dev/benchmark.sh` — wrk, 4 threads · 1000 connections · 30s.
 
 ## Improvements
 
-1. **Graceful shutdown + worker context plumbing** — catch SIGINT/SIGTERM, build an explicit `*http.Server` with timeouts, plumb a `context.Context` into `Ingester.Start(ctx)` so workers drain the queue and flush in-flight batches before exit, then close the ClickHouse connection.
-2. **Surface ingest errors + bounded retry** — replace the discarded error in `eventsWorker` with a zap log + `events_lost_total{reason}` counter, add bounded exponential-backoff retries (e.g., 3 attempts), and consider a DLQ / disk spill for batches that exhaust retries.
-3. **EventTime semantics** — either include `event_time` in `InsertBatch` (defaulting to `time.Now()` when the client omits it), or drop the field from the JSON-bound `Event` so the API no longer implies support it doesn't have.
-4. **Request-size limit + `Data` validation** — wrap the request body with `http.MaxBytesReader` (e.g., 64 KB) and cap `Data` key count / total size to prevent oversized rows and OOMs.
-5. **Unit tests on the ingester** — table-driven tests using a fake `BatchInserter`: `Enqueue` returns false when full, batch flushes at `batchSize`, batch flushes on ticker below `batchSize`, drain-on-shutdown.
-6. **Makefile** — common targets (`run`, `bench`, `test`, `migrate`) so contributors don't memorize commands.
-7. **Top-K events API** — expose an endpoint to report Top-K events.
-8. **Time-series endpoint** — `GET /events/timeseries?bucket=1m&from=...&to=...` returning counts per bucket — perfect for charts.
-9. **Anomaly detector** — alert on high or low spikes in event rates.
+1. **Unit tests on the ingester** — table-driven tests using a fake `BatchInserter`: `Enqueue` returns false when full, batch flushes at `batchSize`, batch flushes on ticker below `batchSize`, drain-on-shutdown.
+2. **Top-K events API** — expose an endpoint to report Top-K events.
+3. **Time-series endpoint** — `GET /events/timeseries?bucket=1m&from=...&to=...` returning counts per bucket — perfect for charts.
+4. **Anomaly detector** — alert on high or low spikes in event rates.
 
 ## Ideas
 

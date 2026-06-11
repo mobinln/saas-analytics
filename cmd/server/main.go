@@ -2,13 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"eventaggregator/internal/config"
 	"eventaggregator/internal/event"
 	"eventaggregator/internal/ingest"
 	"eventaggregator/internal/storage"
 	"log"
 	"net/http"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -73,14 +76,21 @@ func main() {
 	}
 
 	clickhouseStorage := storage.NewClickHouse(conn)
-	eventIngester := ingest.NewIngester(clickhouseStorage, config.QueueCapacity, config.WorkerCount, config.BatchSize, config.BatchFlushIntervalMs)
+	eventIngester := ingest.NewIngester(clickhouseStorage, config.QueueCapacity, config.WorkerCount, config.BatchSize, config.BatchFlushIntervalMs,
+		sugar)
 
 	promauto.NewGaugeFunc(prometheus.GaugeOpts{
 		Name: "events_queue_depth",
 		Help: "Current depth of the in-memory event queue.",
 	}, func() float64 { return float64(eventIngester.QueueDepth()) })
 
-	eventIngester.Start()
+	// ctx is cancelled the moment SIGINT/SIGTERM arrives. The workers watch it
+	// to know when to drain and flush; main blocks on it to know when to start
+	// the shutdown sequence. stop releases the signal handler.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	eventIngester.Start(ctx)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -101,7 +111,20 @@ func main() {
 	r.POST("/event", func(c *gin.Context) {
 		var event event.Event
 
+		// Cap the body before reading it so a huge or never-ending request can't
+		// exhaust memory. MaxBytesReader makes BindJSON fail once the limit is hit.
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, int64(config.MaxBodyBytes))
+
 		if err := c.BindJSON(&event); err != nil {
+			if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+				c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "request body too large"})
+				return
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		if err := event.ValidateData(config.MaxDataKeys, config.MaxDataBytes); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -126,7 +149,44 @@ func main() {
 		c.JSON(http.StatusOK, events)
 	})
 
-	if err := r.Run(config.HTTPAddr); err != nil {
-		sugar.Infof("failed to run server: %v", err)
+	// Build an explicit server (instead of r.Run) so we get timeouts and a
+	// Shutdown hook. The timeouts cap how long slow clients can tie up a
+	// connection.
+	srv := &http.Server{
+		Addr:         config.HTTPAddr,
+		Handler:      r,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
 	}
+
+	// Serve in a goroutine so main can move on to wait for the shutdown signal.
+	// ListenAndServe always returns a non-nil error; ErrServerClosed is the
+	// expected one after Shutdown, so we don't treat it as a failure.
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			sugar.Fatalf("server error: %v", err)
+		}
+	}()
+
+	// Block until a signal cancels ctx.
+	<-ctx.Done()
+	sugar.Info("shutdown signal received, draining...")
+
+	// Stop accepting new requests and let in-flight ones finish.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		sugar.Errorf("http shutdown: %v", err)
+	}
+
+	// ctx is already cancelled, so workers are draining the queue and
+	//    flushing their final batches. Wait for them to finish.
+	eventIngester.Wait()
+
+	// Now that nothing else will write, close the ClickHouse connection.
+	if err := conn.Close(); err != nil {
+		sugar.Errorf("clickhouse close: %v", err)
+	}
+	sugar.Info("shutdown complete")
 }

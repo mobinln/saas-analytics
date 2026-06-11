@@ -20,6 +20,12 @@ type Config struct {
 	WorkerCount        int
 	BatchSize          int
 	BatchFlushIntervalMs int
+
+	// MaxBodyBytes caps the size of an accepted /event request body. MaxDataKeys
+	// and MaxDataBytes bound the Data map so a single event can't blow up a row.
+	MaxBodyBytes int
+	MaxDataKeys  int
+	MaxDataBytes int
 }
 
 func Load() (Config, error) {
@@ -48,6 +54,15 @@ func Load() (Config, error) {
 		return cfg, err
 	}
 	if cfg.BatchFlushIntervalMs, err = getInt("BATCH_FLUSH_INTERVAL_MS", 5000); err != nil {
+		return cfg, err
+	}
+	if cfg.MaxBodyBytes, err = getInt("MAX_BODY_BYTES", 64*1024); err != nil {
+		return cfg, err
+	}
+	if cfg.MaxDataKeys, err = getInt("MAX_DATA_KEYS", 64); err != nil {
+		return cfg, err
+	}
+	if cfg.MaxDataBytes, err = getInt("MAX_DATA_BYTES", 16*1024); err != nil {
 		return cfg, err
 	}
 	return cfg, nil
