@@ -30,14 +30,12 @@ Load: `local_dev/benchmark.sh` — wrk, 4 threads · 1000 connections · 30s.
 2. **Top-K events API** — expose an endpoint to report Top-K events.
 3. **Time-series endpoint** — `GET /events/timeseries?bucket=1m&from=...&to=...` returning counts per bucket — perfect for charts.
 4. **Anomaly detector** — alert on high or low spikes in event rates.
+5. **Downsampling** — save events by different granularity (minute or hour) to reduce storage.
+6. **Pluggable storage backends** — abstract `BatchInserter` is already in place; add adapters for Postgres / Kafka / S3 (Parquet) so the same ingester can fan out to a warehouse or message bus alongside ClickHouse.
 
 ## Ideas
 
-- **Persistence layer** — swap the in-memory store for a durable backend (SQLite/Postgres/BoltDB) so counts and events survive restarts.
 - **Forecasting** — simple Holt-Winters or EWMA baseline alongside the z-score detector.
-- **WebSocket / SSE stream** at `/events/stream` that pushes new events (optionally filtered) live — great for dashboards.
-- **Downsampling** — save events by different granularity (minute or hour) to reduce storage.
-- **Pluggable storage backends** — abstract `BatchInserter` is already in place; add adapters for Postgres / Kafka / S3 (Parquet) so the same ingester can fan out to a warehouse or message bus alongside ClickHouse.
 - **Schema-on-write validation** — let users register named event schemas (JSON Schema or simple field/type maps) and reject events that don't match; emit a `schema_violations_total{schema}` metric.
 - **Per-tenant API keys + rate limiting** — header-based auth (`X-API-Key`) mapped to a tenant ID stored as an event column, with a token-bucket rate limiter per tenant. Unblocks multi-tenant SaaS use.
 - **Sampling / shedding policies** — when the queue crosses a high-water mark, drop low-priority event types (configurable) before dropping high-priority ones, instead of uniform 503s.
@@ -49,3 +47,5 @@ Load: `local_dev/benchmark.sh` — wrk, 4 threads · 1000 connections · 30s.
 - **Grafana dashboard JSON** — ship a pre-built dashboard in `local_dev/` (queue depth, p99, drop rate, ClickHouse insert duration, rows/s) so new contributors get observability out of the box.
 - **Dockerfile + image publish** — multi-stage build, distroless base, GitHub Actions to publish on tag. Pairs with the Makefile in Improvements #6.
 - **Config validation at startup** — reject configs where `WORKER_COUNT > CLICKHOUSE_MAX_OPEN_CONNS` (workers will contend) or `BATCH_FLUSH_INTERVAL_MS == 0`, instead of letting them quietly misbehave.
+- **Dead letter queue (DLQ) for failed inserts** — when ClickHouse insert fails after retries, write events to a local file, S3, or a fallback table for manual inspection/replay. Track `dlq_events_total` metric.
+- **Health check endpoints** — `/live` (always 200) and `/ready` (checks queue depth, ClickHouse connectivity, worker health). Essential for Kubernetes liveness/readiness probes.

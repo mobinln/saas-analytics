@@ -149,9 +149,6 @@ func main() {
 		c.JSON(http.StatusOK, events)
 	})
 
-	// Build an explicit server (instead of r.Run) so we get timeouts and a
-	// Shutdown hook. The timeouts cap how long slow clients can tie up a
-	// connection.
 	srv := &http.Server{
 		Addr:         config.HTTPAddr,
 		Handler:      r,
@@ -160,31 +157,23 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Serve in a goroutine so main can move on to wait for the shutdown signal.
-	// ListenAndServe always returns a non-nil error; ErrServerClosed is the
-	// expected one after Shutdown, so we don't treat it as a failure.
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			sugar.Fatalf("server error: %v", err)
 		}
 	}()
 
-	// Block until a signal cancels ctx.
 	<-ctx.Done()
 	sugar.Info("shutdown signal received, draining...")
 
-	// Stop accepting new requests and let in-flight ones finish.
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		sugar.Errorf("http shutdown: %v", err)
 	}
 
-	// ctx is already cancelled, so workers are draining the queue and
-	//    flushing their final batches. Wait for them to finish.
 	eventIngester.Wait()
 
-	// Now that nothing else will write, close the ClickHouse connection.
 	if err := conn.Close(); err != nil {
 		sugar.Errorf("clickhouse close: %v", err)
 	}
