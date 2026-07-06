@@ -35,6 +35,7 @@ Load: `local_dev/benchmark.sh` — wrk, 4 threads · 1000 connections · 30s.
 
 ## Ideas
 
+- **UI Dashboard** — simple ViteJS app dashboard with charts.
 - **Forecasting** — simple Holt-Winters or EWMA baseline alongside the z-score detector.
 - **Schema-on-write validation** — let users register named event schemas (JSON Schema or simple field/type maps) and reject events that don't match; emit a `schema_violations_total{schema}` metric.
 - **Per-tenant API keys + rate limiting** — header-based auth (`X-API-Key`) mapped to a tenant ID stored as an event column, with a token-bucket rate limiter per tenant. Unblocks multi-tenant SaaS use.
