@@ -26,12 +26,11 @@ Load: `local_dev/benchmark.sh` — wrk, 4 threads · 1000 connections · 30s.
 
 ## Improvements
 
-1. **Unit tests on the ingester** — table-driven tests using a fake `BatchInserter`: `Enqueue` returns false when full, batch flushes at `batchSize`, batch flushes on ticker below `batchSize`, drain-on-shutdown.
-2. **Top-K events API** — expose an endpoint to report Top-K events.
-3. **Time-series endpoint** — `GET /events/timeseries?bucket=1m&from=...&to=...` returning counts per bucket — perfect for charts.
-4. **Anomaly detector** — alert on high or low spikes in event rates.
-5. **Downsampling** — save events by different granularity (minute or hour) to reduce storage.
-6. **Pluggable storage backends** — abstract `BatchInserter` is already in place; add adapters for Postgres / Kafka / S3 (Parquet) so the same ingester can fan out to a warehouse or message bus alongside ClickHouse.
+- **Top-K events API** — expose an endpoint to report Top-K events.
+- **Time-series endpoint** — `GET /events/timeseries?bucket=1m&from=...&to=...` returning counts per bucket — perfect for charts.
+- **Anomaly detector** — alert on high or low spikes in event rates.
+- **Downsampling** — save events by different granularity (minute or hour) to reduce storage.
+- **Pluggable storage backends** — abstract `BatchInserter` is already in place; add adapters for Postgres / Kafka / S3 (Parquet) so the same ingester can fan out to a warehouse or message bus alongside ClickHouse.
 
 ## Ideas
 
